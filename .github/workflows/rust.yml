@@ -1,0 +1,112 @@
+name: Rust
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Build project
+      run: cargo build --release
+
+    - name: List generated files (for debugging)
+      run: ls -R target/release/
+
+    - name: Upload artifact (Linux)
+      if: runner.os == 'Linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: cerberus-linux
+        path: |
+          target/release/cerberus-cli # Reemplaza con el nombre de tu ejecutable
+          target/release/libcerberus.so # Reemplaza con el nombre de tu librería .so
+
+    # - name: Upload artifact (macOS)
+    #   if: runner.os == 'macOS'
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: cerberus-macos
+    #     path: |
+    #       target/release/cerberus-cli.app # Reemplaza con el nombre de tu ejecutable
+    #       target/release/libcerberus.dylib # Reemplaza con el nombre de tu librería .dylib
+
+    - name: Upload artifact (Windows)
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: cerberus-windows
+        path: |
+          target/release/cerberus-cli.exe # Reemplaza con el nombre de tu ejecutable .exe
+          target/release/libcerberus.dll # Reemplaza con el nombre de tu librería .dll
+
+  create-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: List downloaded artifacts
+      run: ls -R artifacts
+
+    - name: Get tag name
+      id: get_tag
+      run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.get_tag.outputs.TAG }}
+        name: Release ${{ steps.get_tag.outputs.TAG }}
+        body: |
+          🎉 ¡Nueva versión disponible! 🎉
+
+          Aquí están los binarios y librerías para diferentes sistemas operativos:
+        files: |
+          artifacts/cerberus-linux/cerberus-cli
+          artifacts/cerberus-linux/libcerberus.so
+          # artifacts/cerberus-macos/cerberus-cli
+          # artifacts/cerberus-macos/libcerberus.dylib
+          artifacts/cerberus-windows/cerberus-cli.exe
+          artifacts/cerberus-windows/libcerberus.dll
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
