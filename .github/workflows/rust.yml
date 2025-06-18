@@ -49,6 +49,15 @@ jobs:
     - name: Current folder
       run: pwd
 
+    - name: Get version from tag
+      id: get_version
+      run: |
+        TAG_REF="${GITHUB_REF}"
+        # Extrae la parte de la etiqueta (ej. release/1.0.0)
+        TAG_NAME="${TAG_REF#refs/tags/}"
+        # Extrae solo la versión (ej. 1.0.0)
+        VERSION="${TAG_NAME#release/}"
+        echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
     - name: Upload artifact (Linux)
       if: runner.os == 'Linux'
       uses: actions/upload-artifact@v4
@@ -99,9 +108,9 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.get_tag.outputs.TAG }}
-        name: Release ${{ steps.get_tag.outputs.TAG }}
+        name: Release ${{ steps.get_version.outputs.VERSION }}
         body: |
-          🎉 ¡Nueva versión disponible! 🎉
+          🎉 ¡Nueva versión disponible ${{ steps.get_version.outputs.VERSION }}! 🎉
 
           Aquí están los binarios y librerías para diferentes sistemas operativos:
         files: |
