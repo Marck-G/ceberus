@@ -3,7 +3,7 @@ name: Rust
 on:
   push:
     tags:
-      - 'v*'
+      - 'release/*'
   workflow_dispatch:
 
 env:
@@ -46,14 +46,17 @@ jobs:
     - name: List generated files (for debugging)
       run: ls -R target/release/
 
+    - name: Current folder
+      run: pwd
+
     - name: Upload artifact (Linux)
       if: runner.os == 'Linux'
       uses: actions/upload-artifact@v4
       with:
         name: cerberus-linux
         path: |
-          target/release/cerberus-cli # Reemplaza con el nombre de tu ejecutable
-          target/release/libcerberus.so # Reemplaza con el nombre de tu librería .so
+          ./target/release/cerberus-cli
+          ./target/release/libcerberus.so
 
     # - name: Upload artifact (macOS)
     #   if: runner.os == 'macOS'
@@ -70,14 +73,14 @@ jobs:
       with:
         name: cerberus-windows
         path: |
-          target/release/cerberus-cli.exe # Reemplaza con el nombre de tu ejecutable .exe
-          target/release/libcerberus.dll # Reemplaza con el nombre de tu librería .dll
+          ./target/release/cerberus-cli.exe 
+          ./target/release/cerberus.dll 
 
   create-release:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/release')
 
     steps:
     - name: Download all artifacts
@@ -104,9 +107,7 @@ jobs:
         files: |
           artifacts/cerberus-linux/cerberus-cli
           artifacts/cerberus-linux/libcerberus.so
-          # artifacts/cerberus-macos/cerberus-cli
-          # artifacts/cerberus-macos/libcerberus.dylib
           artifacts/cerberus-windows/cerberus-cli.exe
-          artifacts/cerberus-windows/libcerberus.dll
+          artifacts/cerberus-windows/cerberus.dll
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
