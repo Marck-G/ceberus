@@ -49,15 +49,30 @@ jobs:
     - name: Current folder
       run: pwd
 
-    - name: Get version from tag
-      id: get_version
+    - name: Get version from tag (Linux/macOS)
+      id: get_version_linux
+      if: runner.os != 'Windows' # Run only on Linux/macOS
       run: |
         TAG_REF="${GITHUB_REF}"
         # Extrae la parte de la etiqueta (ej. release/1.0.0)
         TAG_NAME="${TAG_REF#refs/tags/}"
         # Extrae solo la versión (ej. 1.0.0)
         VERSION="${TAG_NAME#release/}"
-        echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+        echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT" # Use quotes for GITHUB_OUTPUT
+
+    - name: Get version from tag (Windows)
+      id: get_version_windows
+      if: runner.os == 'Windows' # Run only on Windows
+      shell: pwsh # Explicitly set shell to PowerShell
+      run: |
+        $TAG_REF = $env:GITHUB_REF
+        # Extrae la parte de la etiqueta (ej. release/1.0.0)
+        $TAG_NAME = $TAG_REF -replace 'refs/tags/', ''
+        # Extrae solo la versión (ej. 1.0.0)
+        $VERSION = $TAG_NAME -replace 'release/', ''
+        Write-Host "Detected Version: $VERSION" # For debugging
+        echo "VERSION=$VERSION" >> $env:GITHUB_OUTPUT
+
     - name: Upload artifact (Linux)
       if: runner.os == 'Linux'
       uses: actions/upload-artifact@v4
@@ -108,9 +123,9 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.get_tag.outputs.TAG }}
-        name: Release ${{ steps.get_version.outputs.VERSION }}
+         name: Release ${{ (steps.get_version_linux.outputs.VERSION || steps.get_version_windows.outputs.VERSION) }}
         body: |
-          🎉 ¡Nueva versión disponible ${{ steps.get_version.outputs.VERSION }}! 🎉
+          🎉 ¡Nueva versión disponible ${{ (steps.get_version_linux.outputs.VERSION || steps.get_version_windows.outputs.VERSION) }}! 🎉
 
           Aquí están los binarios y librerías para diferentes sistemas operativos:
         files: |
