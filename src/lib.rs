@@ -1,6 +1,5 @@
-use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jstring};
-use jni::JNIEnv;
+use j4rs::{errors::J4RsError, prelude::*, InvocationArg};
+use j4rs_derive::call_from_java;
 
 mod compression;
 mod crypto;
@@ -14,190 +13,197 @@ use crate::crypto::{
 };
 use crate::utils::throw_java_exception;
 
-#[no_mangle]
-pub extern "system" fn Java_org_kcramsolutions_jcerberus_TokenLib_createToken(
-    env: &mut JNIEnv,
-    _class: JClass,
-    header: JString,
-    payload: JString,
-    private_key_path: JString,
-    encrypted_sym_key_path: JString,
-) -> jstring {
-    // Convertir JString a Rust String
-    let header: String = env.get_string(&header).expect("Invalid header").into();
-    let payload: String = env.get_string(&payload).expect("Invalid payload").into();
-    let private_key_path: String = env
-        .get_string(&private_key_path)
-        .expect("Invalid key path")
-        .into();
-    let encrypted_sym_key_path: String = env
-        .get_string(&encrypted_sym_key_path)
-        .expect("Invalid sym key path")
-        .into();
+#[call_from_java("org.kcramsolutions.jcerberus.TokenLib.nCreateToken")]
+fn j_create_token(
+    header_instance: Instance,
+    body_instance: Instance,
+    private_instance: Instance,
+    encrypte_instance: Instance,
+) -> Result<Instance, J4RsError> {
+    let jvm = Jvm::attach_thread()?;
+    let headers: Option<String> = jvm.to_rust(header_instance)?;
+    let body: Option<String> = jvm.to_rust(body_instance)?;
+    let priv_key_path: Option<String> = jvm.to_rust(private_instance)?;
+    let key_path: Option<String> = jvm.to_rust(encrypte_instance)?;
+    // checkin the data
+    let he_json = headers.unwrap_or_else(|| {
+        tracing::warn!("Cerberus: Empty headers");
+        "".to_string()
+    });
+    let bd_json = body.unwrap_or_else(|| {
+        tracing::warn!("Cerberus: Empty headers");
+        "".to_string()
+    });
 
-    // Llamar a la función Rust normal que devuelve Result<String, String>
-    match create_token(
-        &header,
-        &payload,
-        &private_key_path,
-        &encrypted_sym_key_path,
-    ) {
-        Ok(token) => **env.new_string(token).expect("Couldn't create Java string!"),
-        Err(err) => {
-            throw_java_exception(env, &err);
-            std::ptr::null_mut()
-        }
+    let ptv_path = priv_key_path.unwrap_or_else(|| {
+        tracing::error!("Cerberus: null private key!");
+        "null".to_string()
+    });
+
+    let rsa_path = key_path.unwrap_or_else(|| {
+        tracing::error!("Cerberus: null symmetric key path!");
+        "null".to_string()
+    });
+
+    if ptv_path.eq(&"null".to_string()) || rsa_path.eq(&"null".to_string()) {
+        return Err(J4RsError::JavaError("Null private key path".to_string()));
     }
+
+    let out: String = match create_token(&he_json, &bd_json, &ptv_path, &rsa_path) {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!("Cerberus: {}", error);
+            "null".to_string()
+        }
+    };
+
+    if out.eq(&"null".to_string()) {
+        return Err(J4RsError::JavaError("Can't create the token".to_string()));
+    }
+    let out_i = jvm.create_instance("java.lang.String", &[InvocationArg::try_from(out)?]);
+    Ok(out_i.unwrap())
 }
 
-#[no_mangle]
-pub extern "system" fn Java_org_kcramsolutions_jcerberus_TokenLib_verify(
-    env: &mut JNIEnv,
-    _class: JClass,
-    public_key_path: JString,
-    token: JString,
-) -> jboolean {
-    // Convertir argumentos Java a Rust Strings
-    let public_key_path: String = match env.get_string(&public_key_path) {
-        Ok(s) => s.into(),
-        Err(e) => {
-            throw_java_exception(env, &format!("Clave pública inválida: {:?}", e));
-            return 0; // falso
-        }
-    };
+#[call_from_java("org.kcramsolutions.jcerberus.TokenLib.nVerify")]
+fn verify(token_i: Instance, pub_key_i: Instance) -> Result<Instance, J4RsError> {
+    let jvm = Jvm::attach_thread()?;
+    let null_str = "null".to_string();
+    let pub_key_opt: Option<String> = jvm.to_rust(pub_key_i)?;
+    let token_opt: Option<String> = jvm.to_rust(token_i)?;
 
-    let token: String = match env.get_string(&token) {
-        Ok(s) => s.into(),
-        Err(e) => {
-            throw_java_exception(env, &format!("Token inválido: {:?}", e));
-            return 0;
-        }
-    };
-    // Cargar clave pública desde PEM
-    let public_key_pem = match std::fs::read(&public_key_path) {
+    let pub_path = pub_key_opt.unwrap_or_else(|| {
+        tracing::warn!("Cerberus: empty public key path");
+        null_str.clone()
+    });
+    let token = token_opt.unwrap_or_else(|| {
+        tracing::warn!("Cerberus: empty token");
+        null_str.clone()
+    });
+
+    if pub_path.eq(&null_str.clone()) {
+        return Err(J4RsError::JavaError("Empty Public key path".to_string()));
+    }
+
+    if token.eq(&null_str.clone()) {
+        return Err(J4RsError::JavaError("Empty token".to_string()));
+    }
+    let public_key_pem = match std::fs::read(&pub_path) {
         Ok(bytes) => bytes,
         Err(e) => {
-            throw_java_exception(env, &format!("Error leyendo clave pública: {}", e));
-            return 0;
+            tracing::error!("File not found! {}", e);
+            return Err(J4RsError::JavaError("File not found".to_string()));
         }
     };
 
     let public_key = match load_public_key(&public_key_pem) {
         Ok(pk) => pk,
         Err(e) => {
-            throw_java_exception(env, &format!("Error cargando clave pública: {}", e));
-            return 0;
+            tracing::error!("Error loading file: {}", e);
+            return Err(J4RsError::JavaError("Error loading pub key".to_string()));
         }
     };
     // Aquí debes parsear el token en "compressed_base64.signature_base64"
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 2 {
-        throw_java_exception(env, "Token mal formado, debe tener formato 'zip.sign'");
-        return 0;
+        tracing::error!("Token mal formado, debe tener formato 'zip.sign'");
+        return Err(J4RsError::JavaError("Token format missmatch".to_string()));
     }
     let compressed_base64 = parts[0];
     let signature_base64 = parts[1];
-    match verify_signature(&public_key, compressed_base64.as_bytes(), signature_base64) {
-        Ok(valid) => {
-            if valid {
-                1
-            } else {
-                0
+    let verf_result =
+        match verify_signature(&public_key, compressed_base64.as_bytes(), signature_base64) {
+            Ok(valid) => valid,
+            Err(e) => {
+                tracing::error!("Verification error: {}", e);
+                false
             }
-        }
-        Err(e) => {
-            throw_java_exception(env, &format!("Error verificando firma: {}", e));
-            0
-        }
-    }
+        };
+    let out_i = Instance::try_from(InvocationArg::try_from(verf_result)?);
+    Ok(out_i.unwrap())
 }
 
-#[no_mangle]
-pub extern "system" fn Java_org_kcramsolutions_jcerberus_TokenLib_extractTokenData(
-    env: &mut JNIEnv,
-    _class: JClass,
-    token: JString,
-    private_key_path: JString,
-    encrypted_sym_key_path: JString,
-) -> jstring {
-    // Convertir parámetros Java a String de Rust
-    let token: String = match env.get_string(&token) {
-        Ok(s) => s.into(),
-        Err(e) => {
-            throw_java_exception(env, &format!("Token inválido: {:?}", e));
-            return std::ptr::null_mut();
-        }
-    };
 
-    let private_key_path: String = match env.get_string(&private_key_path) {
-        Ok(s) => s.into(),
-        Err(e) => {
-            throw_java_exception(env, &format!("Clave privada inválida: {:?}", e));
-            return std::ptr::null_mut();
-        }
-    };
+#[call_from_java("org.kcramsolutions.jcerberus.TokenLib.nExtractTokenData")]
+fn extract_data(
+    token_i: Instance,
+    priv_key_i: Instance,
+    encrypte_instance: Instance,
+) -> Result<Instance, J4RsError> {
+    let jvm = Jvm::attach_thread()?;
+    let null_str = "null".to_string();
+    let priv_key_opt: Option<String> = jvm.to_rust(priv_key_i)?;
+    let key_path: Option<String> = jvm.to_rust(encrypte_instance)?;
+    let token_opt: Option<String> = jvm.to_rust(token_i)?;
 
-    let encrypted_sym_key_path: String = match env.get_string(&encrypted_sym_key_path) {
-        Ok(s) => s.into(),
-        Err(e) => {
-            throw_java_exception(env, &format!("Clave simétrica inválida: {:?}", e));
-            return std::ptr::null_mut();
-        }
-    };
+    let priv_path = priv_key_opt.unwrap_or_else(|| {
+        tracing::warn!("Cerberus: empty Private key path");
+        null_str.clone()
+    });
+    let token = token_opt.unwrap_or_else(|| {
+        tracing::warn!("Cerberus: empty token");
+        null_str.clone()
+    });
+    let rsa_path = key_path.unwrap_or_else(|| {
+        tracing::error!("Cerberus: null symmetric key path!");
+        null_str.clone()
+    });
 
-    // Separar token: "compressed_base64.signature_base64"
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 2 {
-        throw_java_exception(env, "Token mal formado, debe tener formato 'zip.sign'");
-        return std::ptr::null_mut();
+    if priv_path.eq(&null_str.clone()) {
+        return Err(J4RsError::JavaError("Empty Public key path".to_string()));
     }
-    let compressed_base64 = parts[0];
 
-    // Descomprimir token
-    let decompressed = match decompress_from_base64(compressed_base64) {
+    if token.eq(&null_str.clone()) {
+        return Err(J4RsError::JavaError("Empty token".to_string()));
+    }
+
+    if rsa_path.eq(&null_str.clone()) {
+        return Err(J4RsError::JavaError("Empty RSA Key Path".to_string()));
+    }
+
+    let parts: Vec<&str> = token.split(".").collect();
+    if parts.len() != 2 {
+        tracing::error!("Malformed token");
+        return Err(J4RsError::JavaError("Malformed token".to_string()));
+    }
+    let compressed_b64 = parts[0];
+    let decompressed = match decompress_from_base64(compressed_b64) {
         Ok(data) => data,
         Err(e) => {
-            throw_java_exception(env, &format!("Error descomprimiendo token: {}", e));
-            return std::ptr::null_mut();
+            tracing::error!("Error decompressing token: {}", e);
+            return Err(J4RsError::JavaError("Can't decompress token".to_string()));
         }
     };
-
-    // Separar: "encrypted_header_base64.encrypted_payload_base64"
-    let inner_parts: Vec<&str> = decompressed.split('.').collect();
-    if inner_parts.len() != 2 {
-        throw_java_exception(
-            env,
-            "Contenido mal formado, debe tener formato 'header.payload'",
-        );
-        return std::ptr::null_mut();
+    let inner_pars: Vec<&str> = decompressed.split(".").collect();
+    if inner_pars.len() != 2 {
+        tracing::error!("Malformed token");
+        return Err(J4RsError::JavaError("Malformed token".to_string()));
     }
-    let encrypted_header = inner_parts[0];
-    let encrypted_payload = inner_parts[1];
+    let encrypted_header = inner_pars[0];
+    let encrypted_payload = inner_pars[1];
 
     // Cargar clave privada
-    let private_key = match load_private_key(&private_key_path) {
+    let private_key = match load_private_key(&priv_path) {
         Ok(key) => key,
         Err(e) => {
-            throw_java_exception(env, &format!("Error cargando clave privada: {}", e));
-            return std::ptr::null_mut();
+            tracing::error!("Error cargando clave privada: {}", e);
+            return Err(J4RsError::JavaError("Can't load private key".to_string()));
         }
     };
 
     // Desencriptar clave simétrica
-    let symmetric_key = match decrypt_symmetric_key(&encrypted_sym_key_path, &private_key) {
+    let symmetric_key = match decrypt_symmetric_key(&rsa_path, &private_key) {
         Ok(key) => key,
         Err(e) => {
-            throw_java_exception(env, &format!("Error descifrando clave simétrica: {}", e));
-            return std::ptr::null_mut();
+            tracing::error!("Error descifrando clave simétrica: {}", e);
+            return Err(J4RsError::JavaError("Can't decrypt the rsa key".to_string()));
         }
     };
-
     // Desencriptar header
     let header = match decrypt_from_base64(encrypted_header, &symmetric_key) {
         Ok(data) => data,
         Err(e) => {
-            throw_java_exception(env, &format!("Error desencriptando header: {}", e));
-            return std::ptr::null_mut();
+            tracing::error!("Error desencriptando header: {}", e);
+            return Err(J4RsError::JavaError("Can't decrypt headers".to_string()));
         }
     };
 
@@ -205,19 +211,20 @@ pub extern "system" fn Java_org_kcramsolutions_jcerberus_TokenLib_extractTokenDa
     let payload = match decrypt_from_base64(encrypted_payload, &symmetric_key) {
         Ok(data) => data,
         Err(e) => {
-            throw_java_exception(env, &format!("Error desencriptando payload: {}", e));
-            return std::ptr::null_mut();
+            tracing::error!("Error desencriptando payload: {}", e);
+            return Err(J4RsError::JavaError("Can't decrypt the token's body".to_string()));
         }
     };
 
     // Crear JSON de respuesta para simplificar entrega a Java
     let json_result = format!(r#"{{"header": {}, "payload": {}}}"#, header, payload);
-
-    match env.new_string(json_result) {
-        Ok(result) => **result,
+    let out_i = jvm.create_instance("java.lang.String", &[InvocationArg::try_from(json_result)?]);
+    match out_i{
+        Ok(result) => Ok(result),
         Err(e) => {
-            throw_java_exception(env, &format!("Error devolviendo resultado: {:?}", e));
-            std::ptr::null_mut()
+            tracing::error!("Error devolviendo resultado: {:?}", e);
+            return Err(J4RsError::JavaError("Can't write output".to_string()));
         }
     }
 }
+
