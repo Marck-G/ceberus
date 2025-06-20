@@ -121,13 +121,34 @@ jobs:
       id: get_tag
       run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+    - name: Determine Final Version
+      id: final_version
+      run: |
+        # Access outputs from the build job. If a step was skipped, its output will be null.
+        # The '||' operator handles this gracefully, providing an empty string if null.
+        LINUX_VERSION="${{ needs.build.outputs.linux_version || '' }}"
+        WINDOWS_VERSION="${{ needs.build.outputs.windows_version || '' }}"
+
+        # Prioritize Linux version if available, otherwise use Windows version
+        if [[ -n "$LINUX_VERSION" ]]; then
+          echo "Determined version from Linux build: $LINUX_VERSION"
+          echo "VERSION=$LINUX_VERSION" >> "$GITHUB_OUTPUT"
+        elif [[ -n "$WINDOWS_VERSION" ]]; then
+          echo "Determined version from Windows build: $WINDOWS_VERSION"
+          echo "VERSION=$WINDOWS_VERSION" >> "$GITHUB_OUTPUT"
+        else
+          echo "Error: Could not determine version from build outputs."
+          echo "VERSION=unknown" >> "$GITHUB_OUTPUT" # Fallback version
+          exit 1 # Fail the step if no valid version is found
+        fi
+
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.get_tag.outputs.TAG }}
-         name: Release ${{ (steps.get_version_linux.outputs.VERSION || steps.get_version_windows.outputs.VERSION) }}
+        name: Release ${{ steps.final_version.outputs.VERSION }} # Use the consolidated version output
         body: |
-          🎉 ¡Nueva versión disponible ${{ (steps.get_version_linux.outputs.VERSION || steps.get_version_windows.outputs.VERSION) }}! 🎉
+          🎉 ¡Nueva versión disponible ${{ steps.final_version.outputs.VERSION }}! 🎉
 
           Aquí están los binarios y librerías para diferentes sistemas operativos:
         files: |
