@@ -17,7 +17,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-
+    outputs: # Define job outputs to pass to other jobs
+      linux_version: ${{ steps.get_version_linux.outputs.VERSION }}
+      windows_version: ${{ steps.get_version_windows.outputs.VERSION }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
