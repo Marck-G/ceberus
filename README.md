@@ -1,5 +1,8 @@
 # Cerberus
 
+![](https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Flag_of_Ecuador.svg/20px-Flag_of_Ecuador.svg.png)
+![](https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Flag_of_Spain.svg/20px-Flag_of_Spain.svg.png)
+
 ## Overview
 `cerberus`  is a Rust library for generating, verifying, and extracting data from secure tokens similar to JWT, but with symmetric encryption, Zstd compression, and RSA signature.
 Designed for seamless integration with Java applications via JNI, it offers enhanced security and flexibility.
