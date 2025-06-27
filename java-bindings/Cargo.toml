@@ -1,0 +1,15 @@
+[package]
+name = "java-bindings"
+version = "0.1.0"
+edition = "2021"
+
+
+[lib]
+crate-type = ["cdylib"]
+
+
+[dependencies]
+j4rs = "0.22.0"
+j4rs_derive = "0.1.1"
+core_cerberus = { path = "../core-cerberus" }
+tracing = "0.1.41"
