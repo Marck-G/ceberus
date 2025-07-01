@@ -14,6 +14,7 @@ pub struct Cerberus{
     pub symetric: Vec<u8>,
 }
 
+
 #[pymethods]
 impl Cerberus {
     #[new]
