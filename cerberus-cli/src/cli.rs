@@ -17,14 +17,14 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Genera claves RSA pública y privada
-    GenerateKeys {
+    Certs {
         #[arg(short, long)]
         output: String,
         #[arg(short = 's', long, default_value_t = 2048)]
         key_size: u32,
     },
     /// Genera y cifra una clave simétrica
-    GenerateSymmetricKey {
+    RsaKey {
         #[arg(short, long)]
         public_key: String,
         #[arg(short, long)]
