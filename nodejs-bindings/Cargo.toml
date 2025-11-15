@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-neon = "1.1"
+neon = { version = "1.1", features = ["sys", "serde"] }
 core_cerberus = { path = "../core-cerberus" }
 openssl = { version = "0.10.73", features = ["vendored"] }
 tracing = "0.1.41"
