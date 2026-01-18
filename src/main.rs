@@ -1,62 +1,116 @@
-mod cli;
-mod compression;
-mod crypto;
+use openssl::pkey::PKey;
+use openssl::rsa::Rsa;
+use serde_json::json;
+use tracing::{info, Level};
+use tracing_subscriber;
 
-use clap::Parser;
-use cli::Cli;
+use cerberus::{
+    core::{CerberusProtocol, HandshakeSession, SymmetricAlgo}, errors::error::CerberusError}
+;
 
-use crate::{cli::{generate_keys, generate_symmetric_key, Commands}, crypto::{load_public_key, verify_signature}};
+fn main() -> Result<(), CerberusError> {
+    // Inicializar tracing
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
-// fn main() {
-//     let cli = Cli::parse();
+    info!("Generando pares de claves RSA para cliente y servidor...");
 
-//     match &cli.command {
-//         Commands::GenerateKeys { output, key_size } => {
-//             if let Err(e) = generate_keys(&output, *key_size) {
-//                 eprintln!("Error generando claves: {}", e);
-//             }
-//         }
-//         Commands::GenerateSymmetricKey { public_key, output } => {
-//             if let Err(e) = generate_symmetric_key(public_key.as_str(), output.as_str()) {
-//                 eprintln!("Error generando clave simétrica: {}", e);
-//             }
-//         }
-//     }
-// }
+    // Generar pares de claves
+    let client_rsa = Rsa::generate(2048).unwrap();
+    let server_rsa = Rsa::generate(2048).unwrap();
 
-pub fn main() {
-    let pub_path = "/home/mguzman/Projects/katalyst/agrocs-java/cerberus/certs/public.pem";
-    let token = "KLUv_QBY8QQAR25zRmtGNzk1b0gtSTZ2QS0yYW9GM3Bmc1JIYUF0QmNiRnZKLTk1Z2FGeDF2aXlkWDFPMm5URmpYakJJRkUyX1dGMkZERWpkQjdwMWxqanFHVnh1MXZSWlpaeG8yZHN0THBLRF9OMFpiaURORklNLjZsWU9femVTWE80QUVyVFBNcUtROUY3V0IxbG1YaTdLUE84Nkdaeml2YlNwMHc.AeCY6WXS1wQccn-QDjo0aR92Dnk4mXQU3NPr3wPn2kC8xfIBJE3QbjCYS0wk2eH-wTEi-kJAgqUGGBud1Ih7HhGdN1xJuqg_Tjvqac8mnmjL-LXFMvNOESNvcJ5hLzDtKthK0-QfRb5jxkkApxVp4rtXuQU_JRYwho0Ty9blbNk5iXdIunc725LvPsYzYWc6yVtTwH1qUe0Dp1tXaemA6cdII6lQUb1rt6KLpeufDnD99BSoHQe04tkFQicmn38MY6Yxq1Jg9LXqW01swBlbMr03GCQJbZhbdPK-QKGH-AfrcsD7XCQwb5rCYoBU7nWZEtfIUxQj2F5hZ6Umt68jLA";
-    
-    let public_key_pem = match std::fs::read(&pub_path) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprint!("File not found! {}", e);
-            vec![0]
-        }
-    };
+    let client_private = PKey::from_rsa(client_rsa).unwrap();
+    let client_public = PKey::public_key_from_pem(&client_private.public_key_to_pem().unwrap()).unwrap();
 
-    let public_key = match load_public_key(&public_key_pem) {
-        Ok(pk) => pk,
-        Err(e) => {
-            eprint!("Error loading file: {}", e);
-            return;
-        }
-    };
-    // Aquí debes parsear el token en "compressed_base64.signature_base64"
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 2 {
-        eprint!("Token mal formado, debe tener formato 'zip.sign'");
-    }
-    let compressed_base64 = parts[0];
-    let signature_base64 = parts[1];
-    let verf_result =
-        match verify_signature(&public_key, compressed_base64.as_bytes(), signature_base64) {
-            Ok(valid) => valid,
-            Err(e) => {
-                eprint!("Verification error: {}", e);
-                false
-            }
-        };
-    print!("Result: {}", verf_result);
+    let server_private = PKey::from_rsa(server_rsa).unwrap();
+    let server_public = PKey::public_key_from_pem(&server_private.public_key_to_pem().unwrap()).unwrap();
+
+    info!("Claves generadas correctamente");
+
+    // Crear handshake sessions
+    let mut client_session = HandshakeSession::new(client_private.clone());
+    let mut server_session = HandshakeSession::new(server_private.clone());
+
+    // Cliente inicia handshake
+    info!("Cliente inicia handshake...");
+    let init_msg = client_session.initiate("client1", &client_public.public_key_to_pem().unwrap());
+
+    // Servidor procesa Init y responde
+    info!("Servidor procesa Init y responde...");
+    let response_msg = server_session.process_init(
+        &init_msg,
+        "server1",
+        &server_private,
+        &server_public.public_key_to_pem().unwrap(),
+    );
+
+    // Cliente procesa Response y genera Complete
+    info!("Cliente procesa Response y genera Complete...");
+    let complete_msg = client_session.complete_handshake(&response_msg);
+
+    // Servidor procesa Complete
+    info!("Servidor procesa Complete...");
+    server_session.process_complete(&complete_msg);
+
+    info!("Handshake base completado");
+
+    // Servidor genera y envía clave simétrica cifrada y firmada
+    info!("Servidor genera clave simétrica y la envía al cliente...");
+    let sym_msg = server_session.exchange_symmetric_key(cerberus::crypto::EncryptionType::Aes256Gcm, &server_private);
+
+    // Cliente recibe, verifica y descifra clave simétrica
+    info!("Cliente recibe y verifica clave simétrica...");
+    let (key, algo) = client_session.receive_symmetric_key(&sym_msg, &server_public, &client_private);
+    info!("Clave simétrica recibida y verificada, algoritmo: {:?}", algo);
+
+
+    // Crear protocolos desde la sesión
+    let client_protocol = CerberusProtocol::from_session(&client_session,  &client_private)?;
+    let server_protocol = CerberusProtocol::from_session(&server_session,  &server_private)?;
+
+    info!("Protocolos creados a partir de la sesión");
+
+    // Enviar mensajes de prueba
+    let header1 = json!({"type": "greeting", "timestamp": 1});
+    let body1 = b"Hola desde cliente";
+
+    info!("Cliente codifica y envía mensaje 1...");
+    let encoded1 = client_protocol.encode_message(&header1, body1)?;
+
+    info!("Servidor recibe y decodifica mensaje 1...");
+    let decoded1 = server_protocol.decode_message(&encoded1)?;
+    info!(
+        "Servidor decodificó mensaje: header={}, body={}",
+        String::from_utf8(decoded1.header.clone()).unwrap(),
+        String::from_utf8(decoded1.body.clone()).unwrap()
+    );
+
+    // Segundo mensaje
+    let header2 = json!({"type": "update", "timestamp": 2});
+    let body2 = b"Actualizacion de estado";
+
+    info!("Cliente codifica y envía mensaje 2...");
+    let encoded2 = client_protocol.encode_message(&header2, body2)?;
+
+    info!("Servidor recibe y decodifica mensaje 2...");
+    let decoded2 = server_protocol.decode_message(&encoded2)?;
+    info!(
+        "Servidor decodificó mensaje: header={:?}, body={:?}",
+        String::from_utf8(decoded2.header.clone()).unwrap(),
+        String::from_utf8(decoded2.body.clone()).unwrap()
+    );
+    info!("Secure message");
+    let header3 = json!({"type": "update", "t": 3});
+    let body3 = b"Test seguro";
+    info!("El cliente codifica seguro");
+    let encode3 = client_protocol.secure_encode(&header3, body3)?;
+    info!("El servidor decodifica");
+    let decoded3 = server_protocol.secure_decode(&encode3).unwrap();
+    info!(
+        "Servidor decodificó mensaje: header={:?}, body={:?}",
+        String::from_utf8(decoded3.header.clone()).unwrap(),
+        String::from_utf8(decoded3.body.clone()).unwrap()
+    );
+    info!("Simulación de comunicación segura completada ✅");
+
+    Ok(())
 }
